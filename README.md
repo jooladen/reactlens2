@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Code Skeleton Viewer
 
-## Getting Started
+복잡한 JSX/TSX 파일을 7섹션 뼈대로 즉시 파싱해주는 도구
 
-First, run the development server:
+## 문제
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+새 코드베이스 온보딩 시 `export default` 컴포넌트의 전체 구조를 파악하는 데 시간이 너무 많이 걸립니다. Code Skeleton Viewer는 소스 코드를 붙여넣으면 핵심 구조만 추출해서 한눈에 보여줍니다.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 사용 방법
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. [claude.ai](https://claude.ai)에서 새 대화를 시작합니다
+2. `CodeSkeletonViewer.jsx` 파일의 내용을 복사합니다
+3. Claude에게 "이 코드를 아티팩트로 실행해줘"라고 요청합니다
+4. 아티팩트가 열리면 좌측에 분석할 JSX/TSX 코드를 붙여넣습니다
+5. **파싱하기** 버튼을 클릭합니다
+6. 우측에 7섹션 뼈대 결과가 표시됩니다
+7. **복사** 버튼으로 결과를 클립보드에 복사할 수 있습니다
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 7섹션 파싱 규칙
 
-## Learn More
+| 섹션 | 감지 기준 | 출력 형식 |
+|------|-----------|-----------|
+| 1️⃣ imports | `import`로 시작하는 줄 | 원본 그대로 |
+| 2️⃣ 유틸 함수 | `export default` 밖의 함수 | 선언부 + `/* ... */` |
+| 3️⃣ 내부 컴포넌트 | JSX를 반환하는 내부 함수 | 선언부 + `/* ... */` |
+| 4️⃣ 상태 | `useState`, `useReducer`, `useRef` | 선언부 + 초기값 |
+| 5️⃣ 이벤트/로직 | `handle*`, `on*` 패턴 함수 | 선언부 + `/* ... */` |
+| 6️⃣ 사이드이펙트 | `useEffect`, `useLayoutEffect`, `useCallback`, `useMemo` | deps 배열만 표시 |
+| 7️⃣ JSX 반환 | `return (` 이후 | `/* ... */` |
 
-To learn more about Next.js, take a look at the following resources:
+없는 섹션은 출력되지 않습니다.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 기술 스택
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **React (JSX)** — claude.ai 아티팩트 실행 환경
+- **Tailwind CSS** — 추가 설정 없이 사용 가능
+- **정규식 파싱** — 외부 의존성 없이 단일 파일로 동작
 
-## Deploy on Vercel
+## 향후 계획
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **AST 기반 파서로 교체** — 정규식의 한계를 넘어 정확한 구조 분석
+- **출처 추적** — 각 섹션의 변수/함수가 원본 코드 몇 번째 줄에서 선언됐는지 표시 (예: `// 4️⃣ 상태 (line 12)`)

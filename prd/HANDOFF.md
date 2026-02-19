@@ -1,10 +1,10 @@
 # HANDOFF — Code Skeleton Viewer
 
 ## 마지막 완료
-Chunk 1
+Chunk 2
 
 ## 현재 상태
-`CodeSkeletonViewer.jsx` 생성 완료 — 7섹션 정규식 파서 + 좌우 분할 UI 구현
+`README.md` 작성 완료 — 프로젝트 설명, 사용 방법, 7섹션 규칙, 향후 계획 포함
 
 ## 주의사항
 - Chunk 0은 사람이 직접 진행 (GitHub 저장소 생성 + CLAUDE.md URL 입력)
@@ -14,7 +14,7 @@ Chunk 1
 - 로그 확인: `prd/run-log.txt`
 
 ## 다음 작업
-Chunk 2: README.md 작성
+모든 Chunk 완료
 
 ## 구현 메모
 - 파서가 export default 범위를 brace depth로 추적하여 내부/외부를 구분함
@@ -26,3 +26,4 @@ Chunk 2: README.md 작성
 |------|------|
 | 프로젝트 생성 | HANDOFF 초기화 |
 | Chunk 1 | CodeSkeletonViewer.jsx 생성 (파서 7섹션 + 좌우/상하 반응형 UI) |
+| Chunk 2 | README.md 작성 (프로젝트 설명, 사용 방법, 7섹션 규칙, 향후 계획) |

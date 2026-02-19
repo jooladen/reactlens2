@@ -65,7 +65,7 @@
 - [x] useEffect deps 파싱 동작
 - [x] 복사 버튼 동작
 - [x] 모바일 레이아웃 동작
-- [ ] git commit + push 완료
+- [x] git commit + push 완료
 
 ---
 
@@ -88,5 +88,5 @@
 - 향후 계획 (AST 교체, 출처 추적)
 
 **완료 조건:**
-- [ ] README.md 생성됨
+- [x] README.md 생성됨
 - [ ] git commit + push 완료
