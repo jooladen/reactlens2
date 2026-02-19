@@ -89,4 +89,4 @@
 
 **완료 조건:**
 - [x] README.md 생성됨
-- [ ] git commit + push 완료
+- [x] git commit + push 완료
