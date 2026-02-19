@@ -1,10 +1,10 @@
 # HANDOFF — Code Skeleton Viewer
 
 ## 마지막 완료
-Chunk 2 + 파서 버그 수정 (Fix 1~6)
+버그 수정 Fix 1~10 (파서 버그, 데드코드, UX 불일치, 오탐 방지)
 
 ## 현재 상태
-모든 Chunk 완료 + 파서 품질 보완 완료
+모든 Chunk 완료 + 전체 버그 수정 완료 (Fix 1~10)
 
 ## 주의사항
 - Chunk 0은 사람이 직접 진행 (GitHub 저장소 생성 + CLAUDE.md URL 입력)
@@ -33,3 +33,4 @@ Chunk 2 + 파서 버그 수정 (Fix 1~6)
 | Chunk 1 | CodeSkeletonViewer.jsx 생성 (파서 7섹션 + 좌우/상하 반응형 UI) |
 | Chunk 2 | README.md 작성 (프로젝트 설명, 사용 방법, 7섹션 규칙, 향후 계획) |
 | 버그수정 | Fix 1~6: 주석 필터링, 문자열 오인식 방지, brace depth 개선, 다중줄 useState, 복사 메시지 자동소실, 상수화 |
+| 버그수정2 | Fix 1~10: exportDefaultEnd fallback, return<JSX> 감지, extractSignature 문자열-aware, countBracesInLine 템플릿리터럴, EXPORT_DEFAULT_PATTERN 제거, checkJSX 파라미터 제거, showMessage 헬퍼(모든 메시지 자동소실), Ctrl+Enter 단축키, JSX 감지 정규식 개선(오탐 방지), 인라인 주석 stripInlineComment 추가 |

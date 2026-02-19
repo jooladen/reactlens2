@@ -27,7 +27,21 @@ const EFFECT_HOOKS = ["useEffect", "useLayoutEffect", "useCallback", "useMemo"];
 const HANDLER_PATTERN = /^\s*(?:const|let|var)\s+(handle[A-Z]\w*|on[A-Z]\w*)\s*=|^\s*function\s+(handle[A-Z]\w*|on[A-Z]\w*)\s*\(/;
 const ARROW_FN_PATTERN = /^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:\([^)]*\)|[^=])\s*=>/;
 const FUNCTION_PATTERN = /^\s*(?:export\s+)?function\s+(\w+)\s*\(/;
-const EXPORT_DEFAULT_PATTERN = /^\s*(?:export\s+default\s+(?:function|class)\s|function\s+\w+.*\{)/;
+
+function stripInlineComment(line) {
+  let inStr = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inStr) {
+      if (ch === "\\" && inStr !== "`") { i++; continue; }
+      if (ch === inStr) inStr = null;
+    } else {
+      if (ch === '"' || ch === "'" || ch === "`") inStr = ch;
+      else if (ch === "/" && line[i + 1] === "/") return line.slice(0, i).trimEnd();
+    }
+  }
+  return line;
+}
 
 function stripCommentLines(lines) {
   const clean = [];
@@ -43,7 +57,9 @@ function stripCommentLines(lines) {
       if (!t.includes("*/")) inBlock = true;
       continue;
     }
-    clean.push(line);
+    // 인라인 주석 제거 (문자열 내 // 보존)
+    const inlineStripped = stripInlineComment(line);
+    clean.push(inlineStripped);
   }
   return clean;
 }
@@ -58,11 +74,17 @@ function stripStringLiterals(line) {
 function countBracesInLine(line) {
   let depth = 0;
   let inStr = null;
+  let templateDepth = 0; // ${} 중첩 추적
   let i = 0;
   while (i < line.length) {
     const ch = line[i];
-    if (inStr) {
-      if (ch === "\\" && inStr !== "`") { i += 2; continue; }
+    if (inStr === "`") {
+      if (ch === "\\") { i += 2; continue; }
+      if (ch === "$" && line[i + 1] === "{") { templateDepth++; i += 2; continue; }
+      if (ch === "}" && templateDepth > 0) { templateDepth--; i++; continue; }
+      if (ch === "`" && templateDepth === 0) inStr = null;
+    } else if (inStr) {
+      if (ch === "\\") { i += 2; continue; }
       if (ch === inStr) inStr = null;
     } else {
       if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; }
@@ -139,6 +161,7 @@ function parseCode(code) {
         break;
       }
     }
+    if (exportDefaultEnd === -1) exportDefaultEnd = lines.length - 1; // fallback
   }
 
   // export default 범위 밖 함수 → 2️⃣ 유틸 함수
@@ -160,7 +183,7 @@ function parseCode(code) {
   }
 
   // 2️⃣ 유틸 함수 (export default 밖, JSX 미반환)
-  collectFunctions(outsideLines, lines, sections.utils, false);
+  collectFunctions(outsideLines, lines, sections.utils);
 
   // export default 내부 분석
   if (insideLines.length > 0) {
@@ -218,36 +241,27 @@ function extractSignature(allLines, startIdx) {
   let seenParen = false;
   let parensBalanced = false;
   let sig = "";
+  let inStr = null;
 
   for (let i = startIdx; i < Math.min(startIdx + MAX_SIGNATURE_LINES, allLines.length); i++) {
     const line = allLines[i];
     for (let j = 0; j < line.length; j++) {
       const ch = line[j];
 
-      if (ch === "(") {
-        parenDepth++;
-        seenParen = true;
+      if (inStr) {
+        if (ch === "\\" && inStr !== "`") { sig += ch + (line[j + 1] ?? ""); j++; continue; }
+        if (ch === inStr) inStr = null;
+        sig += ch;
+        continue;
       }
-      if (ch === ")") {
-        parenDepth--;
-        if (seenParen && parenDepth === 0) parensBalanced = true;
-      }
+      if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; sig += ch; continue; }
+      if (ch === "/" && line[j + 1] === "/") break; // 인라인 주석
 
-      // 괄호 균형 후 { → 함수 본문 시작
-      if (parensBalanced && ch === "{") {
-        return sig.trim().replace(/\s+/g, " ");
-      }
-
-      // 괄호 균형 후 => ( → JSX 반환 화살표 함수
-      if (parensBalanced && ch === "(" && /=>\s*$/.test(sig)) {
-        return sig.trim().replace(/\s+/g, " ");
-      }
-
-      // 괄호 없는 화살표 함수 (x => {)
-      if (!seenParen && ch === "{" && sig.includes("=>")) {
-        return sig.trim().replace(/\s+/g, " ");
-      }
-
+      if (ch === "(") { parenDepth++; seenParen = true; }
+      if (ch === ")") { parenDepth--; if (seenParen && parenDepth === 0) parensBalanced = true; }
+      if (parensBalanced && ch === "{") return sig.trim().replace(/\s+/g, " ");
+      if (parensBalanced && ch === "(" && /=>\s*$/.test(sig)) return sig.trim().replace(/\s+/g, " ");
+      if (!seenParen && ch === "{" && sig.includes("=>")) return sig.trim().replace(/\s+/g, " ");
       sig += ch;
     }
     sig += " ";
@@ -256,7 +270,7 @@ function extractSignature(allLines, startIdx) {
   return sig.trim().replace(/\s+/g, " ");
 }
 
-function collectFunctions(lineEntries, allLines, target, checkJSX) {
+function collectFunctions(lineEntries, allLines, target) {
   for (const { idx, line } of lineEntries) {
     const fnMatch = FUNCTION_PATTERN.exec(line) || ARROW_FN_PATTERN.exec(line);
     if (fnMatch && !/^\s*export\s+default/.test(line)) {
@@ -279,7 +293,7 @@ function collectInnerComponents(lineEntries, allLines, target) {
     let hasJSX = false;
     for (let k = idx; k < allLines.length; k++) {
       depth += countBracesInLine(allLines[k]);
-      if (/<\w+[\s/>]/.test(stripStringLiterals(allLines[k]))) {
+      if (/<(?:[A-Z]\w*|[a-z][a-z0-9]*)[\s/>]/.test(stripStringLiterals(allLines[k]))) {
         hasJSX = true;
       }
       if (depth <= 0 && k > idx) break;
@@ -319,7 +333,7 @@ function findMainReturn(lineEntries) {
   for (const { idx, line } of lineEntries) {
     depth += countBracesInLine(line);
     // depth 1 = 컴포넌트 함수 본문 최상위
-    if (depth === 1 && /^\s*return\s*[\(]/.test(line)) {
+    if (depth === 1 && /^\s*return\s*(?:\(|<)/.test(line)) {
       return idx;
     }
   }
@@ -380,12 +394,17 @@ export default function CodeSkeletonViewer() {
   const [result, setResult] = useState("");
   const [message, setMessage] = useState("");
 
+  const showMessage = (msg) => {
+    setMessage(msg);
+    setTimeout(() => setMessage(""), MSG_AUTO_CLEAR_DELAY);
+  };
+
   const handleParse = () => {
     setMessage("");
 
     if (!input.trim()) {
       setResult("");
-      setMessage(MSG_EMPTY_INPUT);
+      showMessage(MSG_EMPTY_INPUT);
       return;
     }
 
@@ -395,28 +414,27 @@ export default function CodeSkeletonViewer() {
 
       if (!formatted.trim()) {
         setResult(input);
-        setMessage(MSG_NO_SECTIONS);
+        showMessage(MSG_NO_SECTIONS);
       } else {
         setResult(formatted);
       }
     } catch (e) {
       setResult(input);
-      setMessage(MSG_PARSE_ERROR);
+      showMessage(MSG_PARSE_ERROR);
     }
   };
 
   const handleCopy = async () => {
     if (!result.trim()) {
-      setMessage(MSG_NOTHING_TO_COPY);
+      showMessage(MSG_NOTHING_TO_COPY);
       return;
     }
 
     try {
       await navigator.clipboard.writeText(result);
-      setMessage(MSG_COPY_SUCCESS);
-      setTimeout(() => setMessage(""), MSG_AUTO_CLEAR_DELAY);
+      showMessage(MSG_COPY_SUCCESS);
     } catch {
-      setMessage(MSG_COPY_FAIL);
+      showMessage(MSG_COPY_FAIL);
     }
   };
 
@@ -439,6 +457,12 @@ export default function CodeSkeletonViewer() {
             placeholder="JSX/TSX 코드를 붙여넣으세요..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                handleParse();
+              }
+            }}
             spellCheck={false}
           />
         </div>
