@@ -1,3 +1,4 @@
+"use client";
 import { useState } from "react";
 
 // ── 상수 ──────────────────────────────────────────────
@@ -18,18 +19,66 @@ const MSG_NOTHING_TO_COPY = "복사할 내용이 없습니다";
 const MSG_COPY_FAIL = "복사에 실패했습니다. 직접 선택해서 복사해주세요";
 const MSG_COPY_SUCCESS = "복사되었습니다!";
 const MSG_PLACEHOLDER = "결과가 여기에 표시됩니다";
+const MAX_SIGNATURE_LINES = 20;
+const MSG_AUTO_CLEAR_DELAY = 3000;
 
-const HOOK_PATTERN = /^\s*(?:const|let)\s+\[.*?\]\s*=\s*use(State|Reducer)\s*\(|^\s*(?:const|let)\s+\w+\s*=\s*useRef\s*\(/;
+const HOOK_PATTERN = /^\s*(?:const|let)\s+\[.*?\]\s*=\s*use(?:State|Reducer)\s*(?:<[^(]*>)?\s*\(|^\s*(?:const|let)\s+\w+\s*=\s*useRef\s*(?:<[^(]*>)?\s*\(/;
 const EFFECT_HOOKS = ["useEffect", "useLayoutEffect", "useCallback", "useMemo"];
 const HANDLER_PATTERN = /^\s*(?:const|let|var)\s+(handle[A-Z]\w*|on[A-Z]\w*)\s*=|^\s*function\s+(handle[A-Z]\w*|on[A-Z]\w*)\s*\(/;
 const ARROW_FN_PATTERN = /^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:\([^)]*\)|[^=])\s*=>/;
 const FUNCTION_PATTERN = /^\s*(?:export\s+)?function\s+(\w+)\s*\(/;
 const EXPORT_DEFAULT_PATTERN = /^\s*(?:export\s+default\s+(?:function|class)\s|function\s+\w+.*\{)/;
 
+function stripCommentLines(lines) {
+  const clean = [];
+  let inBlock = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (inBlock) {
+      if (t.includes("*/")) inBlock = false;
+      continue;
+    }
+    if (t.startsWith("//")) continue;
+    if (t.startsWith("/*")) {
+      if (!t.includes("*/")) inBlock = true;
+      continue;
+    }
+    clean.push(line);
+  }
+  return clean;
+}
+
+function stripStringLiterals(line) {
+  return line
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/`(?:[^`\\]|\\.)*`/g, "``");
+}
+
+function countBracesInLine(line) {
+  let depth = 0;
+  let inStr = null;
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (inStr) {
+      if (ch === "\\" && inStr !== "`") { i += 2; continue; }
+      if (ch === inStr) inStr = null;
+    } else {
+      if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; }
+      else if (ch === "/" && line[i + 1] === "/") break;
+      else if (ch === "{") depth++;
+      else if (ch === "}") depth--;
+    }
+    i++;
+  }
+  return depth;
+}
+
 // ── 파서 ──────────────────────────────────────────────
 
 function parseCode(code) {
-  const lines = code.split("\n");
+  const lines = stripCommentLines(code.split("\n"));
   const sections = {
     imports: [],
     utils: [],
@@ -50,27 +99,42 @@ function parseCode(code) {
   // export default 컴포넌트 범위 파악
   let exportDefaultStart = -1;
   let exportDefaultEnd = -1;
-  let braceDepth = 0;
-  let insideExportDefault = false;
 
+  // 1단계: export default function/class 직접 선언 찾기
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (
-      !insideExportDefault &&
-      /^\s*(?:export\s+default\s+function|const\s+\w+\s*=.*=>\s*\{)/.test(line)
-    ) {
+    if (/^\s*export\s+default\s+(?:function|class)\b/.test(lines[i])) {
       exportDefaultStart = i;
-      insideExportDefault = true;
-      braceDepth = 0;
+      break;
     }
+  }
 
-    if (insideExportDefault) {
-      for (const ch of line) {
-        if (ch === "{") braceDepth++;
-        if (ch === "}") braceDepth--;
+  // 2단계: export default Identifier → 해당 식별자 정의 위치 찾기
+  if (exportDefaultStart === -1) {
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^\s*export\s+default\s+(\w+)\s*;?\s*$/.exec(lines[i]);
+      if (m) {
+        const name = m[1];
+        for (let j = 0; j < lines.length; j++) {
+          if (
+            new RegExp(
+              `^\\s*(?:const|let|var|function)\\s+${name}\\b`
+            ).test(lines[j])
+          ) {
+            exportDefaultStart = j;
+            break;
+          }
+        }
+        break;
       }
-      if (braceDepth <= 0 && exportDefaultStart !== i) {
+    }
+  }
+
+  // brace depth로 범위 끝 찾기
+  if (exportDefaultStart >= 0) {
+    let braceDepth = 0;
+    for (let i = exportDefaultStart; i < lines.length; i++) {
+      braceDepth += countBracesInLine(lines[i]);
+      if (braceDepth <= 0 && i > exportDefaultStart) {
         exportDefaultEnd = i;
         break;
       }
@@ -101,17 +165,26 @@ function parseCode(code) {
   // export default 내부 분석
   if (insideLines.length > 0) {
     // 4️⃣ 상태
-    for (const { line } of insideLines) {
+    for (let si = 0; si < insideLines.length; si++) {
+      const { line } = insideLines[si];
       if (HOOK_PATTERN.test(line)) {
         sections.state.push(line.trim());
+        continue;
+      }
+      // 다중 줄: const [...] = 로 시작하고 이후 3줄 안에 use(State|Reducer|Ref) 존재
+      if (/^\s*(?:const|let)\s+\[/.test(line)) {
+        const joined = insideLines.slice(si, si + 3).map((e) => e.line).join(" ");
+        if (/use(?:State|Reducer)\s*(?:<[^(]*>)?\s*\(|useRef\s*(?:<[^(]*>)?\s*\(/.test(joined)) {
+          sections.state.push(line.trim());
+        }
       }
     }
 
     // 5️⃣ 이벤트/로직 핸들러
-    for (const { line } of insideLines) {
+    for (const { line, idx } of insideLines) {
       if (HANDLER_PATTERN.test(line)) {
-        const name = extractFnName(line);
-        sections.handlers.push(`${line.trim().split("{")[0].trim()} { /* ... */ }`);
+        const sig = extractSignature(lines, idx);
+        sections.handlers.push(`${sig} { /* ... */ }`);
       }
     }
 
@@ -119,7 +192,7 @@ function parseCode(code) {
     for (let j = 0; j < insideLines.length; j++) {
       const { line, idx } = insideLines[j];
       for (const hook of EFFECT_HOOKS) {
-        const hookRegex = new RegExp(`^\\s*${hook}\\s*\\(`);
+        const hookRegex = new RegExp(`^\\s*${hook}\\s*(?:<[^(]*>)?\\s*\\(`);
         if (hookRegex.test(line)) {
           const deps = extractDeps(lines, idx);
           sections.sideEffects.push(`${hook}(... , ${deps});`);
@@ -140,11 +213,54 @@ function parseCode(code) {
   return sections;
 }
 
+function extractSignature(allLines, startIdx) {
+  let parenDepth = 0;
+  let seenParen = false;
+  let parensBalanced = false;
+  let sig = "";
+
+  for (let i = startIdx; i < Math.min(startIdx + MAX_SIGNATURE_LINES, allLines.length); i++) {
+    const line = allLines[i];
+    for (let j = 0; j < line.length; j++) {
+      const ch = line[j];
+
+      if (ch === "(") {
+        parenDepth++;
+        seenParen = true;
+      }
+      if (ch === ")") {
+        parenDepth--;
+        if (seenParen && parenDepth === 0) parensBalanced = true;
+      }
+
+      // 괄호 균형 후 { → 함수 본문 시작
+      if (parensBalanced && ch === "{") {
+        return sig.trim().replace(/\s+/g, " ");
+      }
+
+      // 괄호 균형 후 => ( → JSX 반환 화살표 함수
+      if (parensBalanced && ch === "(" && /=>\s*$/.test(sig)) {
+        return sig.trim().replace(/\s+/g, " ");
+      }
+
+      // 괄호 없는 화살표 함수 (x => {)
+      if (!seenParen && ch === "{" && sig.includes("=>")) {
+        return sig.trim().replace(/\s+/g, " ");
+      }
+
+      sig += ch;
+    }
+    sig += " ";
+  }
+
+  return sig.trim().replace(/\s+/g, " ");
+}
+
 function collectFunctions(lineEntries, allLines, target, checkJSX) {
   for (const { idx, line } of lineEntries) {
     const fnMatch = FUNCTION_PATTERN.exec(line) || ARROW_FN_PATTERN.exec(line);
     if (fnMatch && !/^\s*export\s+default/.test(line)) {
-      const sig = line.trim().split("{")[0].trim();
+      const sig = extractSignature(allLines, idx);
       target.push(`${sig} { /* ... */ }`);
     }
   }
@@ -162,26 +278,18 @@ function collectInnerComponents(lineEntries, allLines, target) {
     let depth = 0;
     let hasJSX = false;
     for (let k = idx; k < allLines.length; k++) {
-      for (const ch of allLines[k]) {
-        if (ch === "{") depth++;
-        if (ch === "}") depth--;
-      }
-      if (/<\w+[\s/>]/.test(allLines[k])) {
+      depth += countBracesInLine(allLines[k]);
+      if (/<\w+[\s/>]/.test(stripStringLiterals(allLines[k]))) {
         hasJSX = true;
       }
       if (depth <= 0 && k > idx) break;
     }
 
     if (hasJSX) {
-      const sig = line.trim().split("{")[0].trim();
+      const sig = extractSignature(allLines, idx);
       target.push(`${sig} { /* ... */ }`);
     }
   }
-}
-
-function extractFnName(line) {
-  const m = HANDLER_PATTERN.exec(line);
-  return m ? m[1] || m[2] : "unknown";
 }
 
 function extractDeps(allLines, startIdx) {
@@ -190,7 +298,7 @@ function extractDeps(allLines, startIdx) {
   let text = "";
   for (let i = startIdx; i < allLines.length; i++) {
     text += allLines[i] + "\n";
-    for (const ch of allLines[i]) {
+    for (const ch of stripStringLiterals(allLines[i])) {
       if (ch === "(") depth++;
       if (ch === ")") depth--;
     }
@@ -209,10 +317,7 @@ function findMainReturn(lineEntries) {
   // 컴포넌트 본문의 return 문 찾기
   let depth = 0;
   for (const { idx, line } of lineEntries) {
-    for (const ch of line) {
-      if (ch === "{") depth++;
-      if (ch === "}") depth--;
-    }
+    depth += countBracesInLine(line);
     // depth 1 = 컴포넌트 함수 본문 최상위
     if (depth === 1 && /^\s*return\s*[\(]/.test(line)) {
       return idx;
@@ -309,6 +414,7 @@ export default function CodeSkeletonViewer() {
     try {
       await navigator.clipboard.writeText(result);
       setMessage(MSG_COPY_SUCCESS);
+      setTimeout(() => setMessage(""), MSG_AUTO_CLEAR_DELAY);
     } catch {
       setMessage(MSG_COPY_FAIL);
     }

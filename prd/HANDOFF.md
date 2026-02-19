@@ -1,10 +1,10 @@
 # HANDOFF — Code Skeleton Viewer
 
 ## 마지막 완료
-Chunk 2
+Chunk 2 + 파서 버그 수정 (Fix 1~6)
 
 ## 현재 상태
-모든 Chunk 완료
+모든 Chunk 완료 + 파서 품질 보완 완료
 
 ## 주의사항
 - Chunk 0은 사람이 직접 진행 (GitHub 저장소 생성 + CLAUDE.md URL 입력)
@@ -20,6 +20,11 @@ Chunk 2
 - 파서가 export default 범위를 brace depth로 추적하여 내부/외부를 구분함
 - 내부 컴포넌트 감지는 함수 본문에 `<태그` 패턴이 있는지로 판단 (정규식 한계)
 - useEffect deps 추출은 마지막 `[...]` 패턴 매칭 방식
+- stripCommentLines: // 및 /* */ 주석 줄 제거 (parseCode 진입 전 적용)
+- stripStringLiterals: 문자열 내 JSX/brace 오인식 방지
+- countBracesInLine: 문자열·인라인주석 무시하며 {/} depth 계산
+- 다중 줄 useState: 이후 3줄 lookahead로 감지
+- MAX_SIGNATURE_LINES=20, MSG_AUTO_CLEAR_DELAY=3000 상수화
 
 ## 히스토리
 | 시점 | 내용 |
@@ -27,3 +32,4 @@ Chunk 2
 | 프로젝트 생성 | HANDOFF 초기화 |
 | Chunk 1 | CodeSkeletonViewer.jsx 생성 (파서 7섹션 + 좌우/상하 반응형 UI) |
 | Chunk 2 | README.md 작성 (프로젝트 설명, 사용 방법, 7섹션 규칙, 향후 계획) |
+| 버그수정 | Fix 1~6: 주석 필터링, 문자열 오인식 방지, brace depth 개선, 다중줄 useState, 복사 메시지 자동소실, 상수화 |
